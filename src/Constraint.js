@@ -70,3 +70,21 @@ export class DistanceConstraint extends Constraint {
     this.particleB.position = this.particleB.position.sub(offset);
   }
 }
+
+export class AxisConstraint extends Constraint {
+  constructor(startPoint, endPoint, particle) {
+    super();
+    this.startPoint = startPoint;
+    this.endPoint = endPoint;
+    this.particle = this.particle;
+    this.abNorm = this.endPoint.sub(this.startPoint).normalize();
+  }
+
+  applyConstraint() {
+    const { abNorm } = this;
+    const ac = this.particle.position.sub(this.startPoint);
+    const projectLength = ac.dot(abNorm);
+    const projectVector = abNorm.multiply(projectLength);
+    this.particle.position = this.startPoint + projectVector;
+  }
+}
