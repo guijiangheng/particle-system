@@ -5,7 +5,8 @@ module.exports = {
   entry: {
     main: path.resolve(__dirname, '../src/index'),
     chain: path.resolve(__dirname, '../examples/chain'),
-    particles: path.resolve(__dirname, '../examples/particles')
+    particles: path.resolve(__dirname, '../examples/particles'),
+    jellyfish: path.resolve(__dirname, '../examples/jellyfish/index')
   },
   module: {
     rules: [
@@ -29,6 +30,11 @@ module.exports = {
       filename: 'particles.html',
       title: 'particles',
       chunks: ['particles']
+    }),
+    new HtmlWebpackPlugin({
+      filename: 'jellyfish.html',
+      title: 'jellyfish',
+      chunks: ['jellyfish']
     })
   ]
 };
