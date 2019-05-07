@@ -1,3 +1,4 @@
+const path = require('path');
 const merge = require('webpack-merge');
 
 module.exports = merge(require('./common'), {
@@ -15,6 +16,7 @@ module.exports = merge(require('./common'), {
   devtool: 'inline-source-map',
   devServer: {
     open: true,
-    overlay: true
+    overlay: true,
+    contentBase: path.join(__dirname, 'dist')
   }
 });

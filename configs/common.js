@@ -1,6 +1,12 @@
+const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
 module.exports = {
+  entry: {
+    main: path.resolve(__dirname, '../src/index'),
+    chain: path.resolve(__dirname, '../examples/chain'),
+    particles: path.resolve(__dirname, '../examples/particles')
+  },
   module: {
     rules: [
       {
@@ -15,7 +21,14 @@ module.exports = {
   },
   plugins: [
     new HtmlWebpackPlugin({
-      title: 'particle-system'
+      filename: 'chain.html',
+      title: 'chain',
+      chunks: ['chain']
+    }),
+    new HtmlWebpackPlugin({
+      filename: 'particles.html',
+      title: 'particles',
+      chunks: ['particles']
     })
   ]
 };
