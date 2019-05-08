@@ -44,19 +44,28 @@ export class BoxConstraint extends Constraint {
 }
 
 export class DistanceConstraint extends Constraint {
-  constructor(particleA, particleB, distance) {
+  constructor(particleA, particleB, minDistance, maxDistance) {
     super();
     this.particleA = particleA;
     this.particleB = particleB;
-    this.distance =
-      typeof distance === 'undefined'
+    this.setDistance(minDistance, maxDistance);
+  }
+
+  setDistance(minDistance, maxDistance) {
+    this.minDistance =
+      typeof minDistance === 'undefined'
         ? this.particleA.position.distance(this.particleB.position)
-        : distance;
+        : minDistance;
+    this.maxDistance =
+      typeof maxDistance === 'undefined' ? this.minDistance : maxDistance;
   }
 
   applyConstraint() {
-    let v = this.particleA.position.sub(this.particleB.position);
+    const { minDistance, maxDistance, particleA, particleB } = this;
+    let v = particleA.position.sub(particleB.position);
     let dist = v.length();
+
+    if (dist < maxDistance && dist > minDistance) return;
 
     // avoid NAN
     if (dist < 0.0001) {
@@ -64,10 +73,11 @@ export class DistanceConstraint extends Constraint {
       dist = 0.1;
     }
 
-    const diff = (this.distance - dist) / dist / 2;
+    const distance = dist < minDistance ? minDistance : maxDistance;
+    const diff = (distance - dist) / dist / 2;
     const offset = v.multiply(diff);
-    this.particleA.position = this.particleA.position.add(offset);
-    this.particleB.position = this.particleB.position.sub(offset);
+    particleA.position = particleA.position.add(offset);
+    particleB.position = particleB.position.sub(offset);
   }
 }
 
@@ -81,10 +91,10 @@ export class AxisConstraint extends Constraint {
   }
 
   applyConstraint() {
-    const { abNorm } = this;
-    const ac = this.particle.position.sub(this.startPoint);
+    const { abNorm, particle, startPoint } = this;
+    const ac = particle.position.sub(startPoint);
     const projectLength = ac.dot(abNorm);
     const projectVector = abNorm.multiply(projectLength);
-    this.particle.position = this.startPoint + projectVector;
+    particle.position = startPoint + projectVector;
   }
 }
