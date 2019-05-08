@@ -6,6 +6,10 @@ export default class Particle {
     this.prevPosition = prevPosition;
   }
 
+  distance(particle) {
+    return this.position.distance(particle.position);
+  }
+
   getVelocity() {
     return this.position.sub(this.prevPosition);
   }

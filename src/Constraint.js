@@ -86,7 +86,7 @@ export class AxisConstraint extends Constraint {
     super();
     this.startPoint = startPoint;
     this.endPoint = endPoint;
-    this.particle = this.particle;
+    this.particle = particle;
     this.abNorm = this.endPoint.sub(this.startPoint).normalize();
   }
 
@@ -95,6 +95,6 @@ export class AxisConstraint extends Constraint {
     const ac = particle.position.sub(startPoint);
     const projectLength = ac.dot(abNorm);
     const projectVector = abNorm.multiply(projectLength);
-    particle.position = startPoint + projectVector;
+    particle.position = startPoint.add(projectVector);
   }
 }
