@@ -185,7 +185,8 @@ export default class Jellyfish extends Composite {
       geom,
       new THREE.LineBasicMaterial({
         transparent: true,
-        opacity: 0.5
+        opacity: 0.5,
+        blending: THREE.AdditiveBlending
       })
     );
 
@@ -228,6 +229,7 @@ export default class Jellyfish extends Composite {
         transparent: true,
         depthTest: false,
         depthWrite: false,
+        blending: THREE.AdditiveBlending,
         uniforms: {
           diffuse: { value: new THREE.Color(0x415ab5) },
           opacity: { value: 0.25 }
