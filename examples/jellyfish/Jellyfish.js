@@ -2,30 +2,16 @@ import * as THREE from 'three';
 import * as Links from './Links';
 import * as Faces from './Faces';
 import * as Geometry from './Geometry';
-import {
-  Composite,
-  Particle,
-  Vector3,
-  DistanceConstraint,
-  ParticleSystem,
-  PinConstraint,
-  DirectionalForce
-} from '../../src';
-import basicVertShader from './shaders/basic-vert.glsl';
-import bulbFragShader from './shaders/bulb-frag.glsl';
-import tailFragShader from './shaders/tail-frag.glsl';
-import { AxisConstraint } from '../../src/Constraint';
+import { Composite } from '../../src';
 
-function ribRadius(k) {
+function ribRadius(t) {
   return (
-    Math.sin(Math.PI - Math.PI * 0.55 * k * 1.8) + Math.log(k * 100 + 2) / 3
+    Math.sin(Math.PI - Math.PI * 0.55 * t * 1.8) + Math.log(t * 100 + 2) / 3
   );
 }
 
-function tentacleUvs(segments, uvs) {
-  for (let i = 0; i < segments; ++i) {
-    uvs.push(0, 0);
-  }
+function tailRibRadius(t) {
+  return Math.sin(0.25 * t * Math.PI + 0.5 * Math.PI) * (1 - 0.9 * t);
 }
 
 function ribUvs(v, segments, buffer) {
@@ -38,369 +24,258 @@ function ribUvs(v, segments, buffer) {
   buffer.push(0, v);
 }
 
-function innerRibIndices(offset, start, segments, buffer) {
-  const step = Math.floor(segments / 3);
-  for (let i = 0; i < 3; ++i) {
-    const a = offset + step * i;
-    const b = offset + step * (i + 1);
-    buffer.push(start + (a % segments), start + (b % segments));
-  }
-  return buffer;
-}
-
 export default class Jellyfish extends Composite {
   constructor() {
     super();
 
-    this.gravity = -0.001;
-    this.size = 20;
-    this.segments = 27;
-    this.tentacleSegmentLength = 1;
+    this.size = 40;
+    this.yOffset = 20;
+    this.segments = 4;
+    this.totalSegments = 4 * 9;
 
+    this.topStart = 3;
     this.uvs = [];
+    this.links = [];
+    this.innerLinks = [];
+    this.ribs = [];
+    this.tailRibs = [];
     this.bulbFaces = [];
     this.tailFaces = [];
-    this.ribs = [];
-    this.tentacles = [];
-    this.links = [];
 
     this.createGeometry();
-    this.createSystem();
-    this.createMeshs();
+    this.createSceneItems();
   }
 
   createGeometry() {
-    const ribsCount = 20;
-    const tentacleSegments = 100;
-    const tailCount = 3;
+    this.createCore();
+    this.createBulb();
+    this.createTail();
+    this.createMouth();
+  }
 
-    this.createSpine();
+  createCore() {
+    const { size, totalSegments, uvs, particles, bulbFaces, topStart } = this;
+    const offsets = [size * 1.5, -size * 0.5, -size];
 
-    for (let i = 0; i < ribsCount; ++i) {
-      this.createRib(i, ribsCount);
+    for (const offset of offsets) {
+      Geometry.point(0, offset, 0, particles);
+      uvs.push(0, 0);
+    }
+
+    Faces.radial(0, topStart, totalSegments, bulbFaces);
+  }
+
+  createBulb() {
+    const ribCount = 20;
+    this.ribs = [];
+
+    for (let i = 0; i < ribCount; ++i) {
+      this.createRib(i, ribCount);
       if (i > 0) {
         this.createSkin(i - 1, i);
       }
     }
-
-    for (let i = 0; i < tentacleSegments; ++i) {
-      this.createTentacleSegment(i);
-      if (i > 0) {
-        this.linkTentacle(i - 1, i);
-      } else {
-        this.attachTentacles();
-      }
-    }
-
-    for (let i = 0; i < tailCount; ++i) {
-      this.createTail(i, tailCount);
-    }
   }
 
-  // 制作脊骨
-  createSpine() {
-    const { size, segments, uvs, particles, bulbFaces } = this;
-    Geometry.point(new Vector3(0, size, 0), particles);
-    uvs.push(0, 0);
-    Faces.radial(0, 1, segments, bulbFaces);
-  }
+  createRib(index, total) {
+    const { topStart, totalSegments, size, yOffset, uvs, particles } = this;
+    const k = index / total;
+    const y = size + yOffset - k * size;
+    const start = topStart + index * totalSegments;
+    const radius = ribRadius(k) * 15;
 
-  createRib(index, ribsCount) {
-    const { size, segments, uvs, links } = this;
-    const k = index / ribsCount;
-    const y = size - k * size;
-    const radius = ribRadius(k) * 10 + 0.5;
-    const start = index * segments + 1;
-
-    Geometry.circle(segments, radius, y, this.particles);
-    ribUvs(k, segments, uvs);
-
-    const ribIndices = Links.loop(start, segments, []);
-    const ribLen = (2 * Math.PI * radius) / segments;
-    const rib = this.distanceConstraints(ribIndices, ribLen * 0.9, ribLen);
-
-    const innerIndices = [];
-    innerRibIndices(0, start, segments, innerIndices);
-    innerRibIndices(3, start, segments, innerIndices);
-    innerRibIndices(6, start, segments, innerIndices);
-
-    const innerRibLen = (Math.PI * 2 * radius) / 3;
-    const innerRib = this.distanceConstraints(
-      innerIndices,
-      innerRibLen * 0.8,
-      innerRibLen
-    );
+    Geometry.circle(totalSegments, radius, y, particles);
+    ribUvs(k, totalSegments, uvs);
 
     if (index === 0) {
-      const spineIndices = Links.radial(0, 1, segments, []);
-      const spine = this.distanceConstraints(
-        spineIndices,
-        radius * 0.8,
-        radius
-      );
-      this.addLinks(spineIndices);
-      this.queneConstraints(spine);
+      this.addLinks(Links.radial(0, start, totalSegments, []));
     }
 
-    this.queneConstraints(rib, innerRib);
-
     this.ribs.push({
+      start,
       radius,
-      start: 1 + index * segments
+      yPos: y
     });
   }
 
-  createSkin(indexA, indexB) {
-    const { segments, links, ribs, bulbFaces, particles } = this;
-    const ribA = ribs[indexA];
-    const ribB = ribs[indexB];
-    const dist = particles[ribA.start].distance(particles[ribB.start]);
-
-    const skinIndices = Links.ring(ribA.start, ribB.start, segments, []);
-    const skin = this.distanceConstraints(skinIndices, dist * 0.5, dist);
-    this.addLinks(skinIndices);
-    this.queneConstraints(skin);
-
-    Faces.ring(ribA.start, ribB.start, segments, bulbFaces);
+  createSkin(r0, r1) {
+    const { totalSegments, bulbFaces } = this;
+    const rib0 = this.ribs[r0];
+    const rib1 = this.ribs[r1];
+    this.addLinks(Links.ring(rib0.start, rib1.start, totalSegments, []));
+    Faces.ring(rib0.start, rib1.start, totalSegments, bulbFaces);
   }
 
-  createTentacleSegment(index) {
-    const { segments, particles, uvs, tentacleSegmentLength } = this;
-    const radius = 10;
-    const y = -index * tentacleSegmentLength;
+  createTail() {
+    const tailRibsCount = 15;
+    this.tailRibs = [];
+    for (let i = 0; i < tailRibsCount; ++i) {
+      this.createTailRib(i, tailRibsCount);
+      this.createTailSkin(i - 1, i);
+    }
+  }
+
+  createTailRib(index, total) {
+    const { size, totalSegments, ribs, verts, uvs, particles } = this;
+    const lastRib = ribs[ribs.length - 1];
+    const k = index / total;
+    const y = lastRib.yPos - k * size * 0.8;
     const start = particles.length;
+    const radius = tailRibRadius(k) * lastRib.radius;
 
-    Geometry.circle(segments, radius, y, particles);
-    tentacleUvs(segments, uvs);
+    Geometry.circle(totalSegments, radius, y, particles);
+    ribUvs(k, totalSegments, uvs);
 
-    this.tentacles.push({ start });
+    this.tailRibs.push({
+      start,
+      radius
+    });
   }
 
-  linkTentacle(a, b) {
-    const { segments, tentacles, tentacleSegmentLength } = this;
-    const tentA = tentacles[a];
-    const tentB = tentacles[b];
-    const indices = Links.ring(tentA.start, tentB.start, segments, []);
-    const constraints = this.distanceConstraints(
-      indices,
-      tentacleSegmentLength * 0.5,
-      tentacleSegmentLength
+  createTailSkin(r0, r1) {
+    const { totalSegments, ribs, tailRibs, tailFaces, innerLinks } = this;
+    const rib0 = r0 < 0 ? ribs[ribs.length - 1] : tailRibs[r0];
+    const rib1 = tailRibs[r1];
+    this.addLinks(
+      Links.ring(rib0.start, rib1.start, totalSegments, []),
+      innerLinks
     );
-    this.queneConstraints(constraints);
-    this.addLinks(indices);
+    Faces.ring(rib0.start, rib1.start, totalSegments, tailFaces);
   }
 
-  attachTentacles() {
-    const { segments, ribs, tentacles, tentacleSegmentLength } = this;
-    const rib = ribs[ribs.length - 1];
-    const tentacle = tentacles[0];
-    const indices = Links.ring(rib.start, tentacle.start, segments, []);
-    const constraints = this.distanceConstraints(
-      indices,
-      tentacleSegmentLength * 0.5,
-      tentacleSegmentLength
-    );
-    this.queneConstraints(constraints);
-    this.addLinks(indices);
+  createMouth() {
+    this.createMouthArmGroup(1.0, 0, 4, 3);
+    this.createMouthArmGroup(0.8, 1, 8, 3, 3);
+    this.createMouthArmGroup(0.5, 7, 9, 6);
   }
 
-  createTail(index, tailCount) {
-    const { size, particles, uvs, tailFaces } = this;
-    const tailSegments = 50;
-    const innerSize = 1;
-    const outterSize = innerSize * 1.8;
-    const linkSizeScale = tailSegments * 0.25;
-    const startOffset = size;
-    const outerAngle = (Math.PI * 2 * index) / tailCount;
-
-    const innerStart = particles.length;
-    const innerEnd = innerStart + tailSegments - 1;
-    const outerStart = innerEnd + 1;
-    const innerIndices = Links.line(innerStart, tailSegments, [0, innerStart]);
-    const outerIndices = Links.line(outerStart, tailSegments, []);
-
-    for (let i = 0; i < tailSegments; ++i) {
-      Geometry.point(new Vector3(0, startOffset - i * innerSize, 0), particles);
-      uvs.push(0, i / (tailSegments - 1));
-    }
-
-    const linkConstraints = [];
-    const linkIndices = [];
-
-    for (let i = 0; i < tailSegments; ++i) {
-      const innerIndex = innerStart + i;
-      const outerIndex = outerStart + i;
-      const linkSize =
-        Math.sin((i / (tailSegments - 1)) * Math.PI * 0.8) * linkSizeScale;
-      const outerX = Math.cos(outerAngle) * linkSize;
-      const outerZ = Math.sin(outerAngle) * linkSize;
-      const outerY = startOffset - i * outterSize;
-
-      Geometry.point(new Vector3(outerX, outerY, outerZ), particles);
-      uvs.push(1, i / (tailSegments - 1));
-
-      linkIndices.push(innerIndex, outerIndex);
-      linkConstraints.push(
-        new DistanceConstraint(
-          particles[innerIndex],
-          particles[outerIndex],
-          linkSize
-        )
-      );
-
-      if (i > 1) {
-        Faces.quad(
-          innerIndex - 1,
-          outerIndex - 1,
-          innerIndex,
-          outerIndex,
-          tailFaces
-        );
-      }
-    }
-
-    const inner = this.distanceConstraints(
-      innerIndices,
-      innerSize * 0.25,
-      innerSize
-    );
-
-    const outer = this.distanceConstraints(
-      outerIndices,
-      outterSize * 0.25,
-      outterSize
-    );
-
-    const axis = this.axisConstraints(
-      innerIndices,
-      new Vector3(0, 20, 0),
-      new Vector3(0, 0, 0)
-    );
-
-    this.queneConstraints(inner, outer, axis, linkConstraints);
-    this.addLinks(outerIndices);
-  }
-
-  addLinks(links) {
-    this.links.push(...links);
-  }
-
-  distanceConstraints(indices, minDistance, maxDistance) {
-    const constraints = [];
-    for (let i = 0; i < indices.length; i += 2) {
-      constraints.push(
-        new DistanceConstraint(
-          this.particles[indices[i]],
-          this.particles[indices[i + 1]],
-          minDistance,
-          maxDistance
-        )
-      );
-    }
-    return constraints;
-  }
-
-  axisConstraints(indices, startPoint, endPoint) {
-    const constraints = [];
-    for (let index of indices) {
-      constraints.push(
-        new AxisConstraint(startPoint, endPoint, this.particles[index])
-      );
-    }
-    return constraints;
-  }
-
-  queneConstraints(...constraints) {
-    for (const constraint of constraints) {
-      if (constraint instanceof Array) {
-        for (const c of constraint) {
-          this.constraints.push(c);
-        }
-      } else {
-        this.constraints.push(constraint);
-      }
+  createMouthArmGroup(vScale, r0, r1, count, offset) {
+    for (let i = 0; i < count; ++i) {
+      this.createMouthArm(vScale, r0, r1, i, count, offset);
     }
   }
 
-  createSystem() {
-    const { gravity, particles, constraints } = this;
-    constraints.push(new PinConstraint(particles[0]));
-    this.system = new ParticleSystem(2);
-    this.system.addComposite(this);
-    this.system.addForce(new DirectionalForce(new Vector3(0, gravity, 0)));
+  createMouthArm(vScale, r0, r1, index, total, offset) {}
+
+  createSceneItems() {
+    this.item = new THREE.Group();
+    this.uv = new THREE.BufferAttribute(new Float32Array(this.uvs), 2);
+    this.position = new THREE.BufferAttribute(this.getPositionBuffer(), 3);
+
+    // this.createDots();
+    this.createLines();
+    this.createBulbMesh();
+    this.createTailMesh();
   }
 
-  createMeshs() {
-    const uvs = new THREE.BufferAttribute(new Float32Array(this.uvs), 2);
-    const vertices = new THREE.BufferAttribute(this.getPositionBuffer(), 3);
+  createDots() {
+    const geom = new THREE.BufferGeometry();
+    geom.addAttribute('position', this.position);
+    this.dots = new THREE.Points(geom, new THREE.PointsMaterial());
+    this.item.add(this.dots);
+  }
 
-    this.vertices = vertices;
-
-    const linesGeom = new THREE.BufferGeometry();
-    linesGeom.addAttribute('position', vertices);
-    linesGeom.setIndex(
-      new THREE.BufferAttribute(new Uint16Array(this.links), 1)
-    );
+  createLines() {
+    const geom = new THREE.BufferGeometry();
+    const indices = new THREE.BufferAttribute(new Uint16Array(this.links), 1);
+    geom.addAttribute('position', this.position);
+    geom.setIndex(indices);
 
     this.lines = new THREE.LineSegments(
-      linesGeom,
+      geom,
       new THREE.LineBasicMaterial({
-        opacity: 0.3,
-        transparent: true
+        transparent: true,
+        opacity: 0.5
       })
     );
-    this.lines.scale.multiplyScalar(1.1);
 
-    const bulbGeom = new THREE.BufferGeometry();
-    bulbGeom.addAttribute('position', vertices);
-    bulbGeom.addAttribute('uv', uvs);
-    bulbGeom.setIndex(
+    this.item.add(this.lines);
+  }
+
+  createBulbMesh() {
+    const geom = new THREE.BufferGeometry();
+    geom.addAttribute('position', this.position);
+    geom.addAttribute('uv', this.uv);
+    geom.setIndex(
       new THREE.BufferAttribute(new Uint16Array(this.bulbFaces), 1)
     );
-    bulbGeom.computeVertexNormals();
+
+    geom.computeVertexNormals();
 
     this.bulb = new THREE.Mesh(
-      bulbGeom,
+      geom,
       new THREE.RawShaderMaterial({
-        vertexShader: basicVertShader,
-        fragmentShader: bulbFragShader,
-        side: THREE.DoubleSide,
+        vertexShader: require('./shaders/normal-vert.glsl').default,
+        fragmentShader: require('./shaders/bulb-frag.glsl').default,
+        transparent: true,
         uniforms: {
-          opacity: { value: 1 }
+          diffuse: { value: new THREE.Color(0xffa9d2) },
+          diffuseB: { value: new THREE.Color(0x70256c) },
+          time: { value: 0 },
+          opacity: { value: 0.75 }
         }
       })
     );
 
-    const tailGeom = new THREE.BufferGeometry();
-    tailGeom.addAttribute('position', vertices);
-    tailGeom.addAttribute('uv', uvs);
-    tailGeom.setIndex(
+    this.bulb.scale.multiplyScalar(0.95);
+    this.item.add(this.bulb);
+
+    this.bulbFaint = new THREE.Mesh(
+      geom,
+      new THREE.RawShaderMaterial({
+        vertexShader: require('./shaders/normal-vert.glsl').default,
+        fragmentShader: require('./shaders/gel-frag.glsl').default,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        uniforms: {
+          diffuse: { value: new THREE.Color(0x415ab5) },
+          opacity: { value: 0.25 }
+        }
+      })
+    );
+
+    this.bulbFaint.scale.multiplyScalar(1.05);
+    this.item.add(this.bulbFaint);
+  }
+
+  createTailMesh() {
+    const geom = new THREE.BufferGeometry();
+    geom.addAttribute('position', this.position);
+    geom.addAttribute('uv', this.uv);
+    geom.setIndex(
       new THREE.BufferAttribute(new Uint16Array(this.tailFaces), 1)
     );
 
+    geom.computeVertexNormals();
+
     this.tail = new THREE.Mesh(
-      tailGeom,
+      geom,
       new THREE.RawShaderMaterial({
+        vertexShader: require('./shaders/normal-vert.glsl').default,
+        fragmentShader: require('./shaders/tail-frag.glsl').default,
         transparent: true,
-        side: THREE.DoubleSide,
-        vertexShader: basicVertShader,
-        fragmentShader: tailFragShader,
         uniforms: {
-          opacity: { value: 0.5 }
+          diffuse: { value: new THREE.Color(0xe4bbee) },
+          diffuseB: { value: new THREE.Color(0x241138) },
+          scale: { value: 20 },
+          opacity: { value: 0.75 }
         }
       })
     );
+
+    this.tail.scale.multiplyScalar(0.95);
+    this.item.add(this.tail);
+  }
+
+  addLinks(links, buffer) {
+    buffer = buffer || this.links;
+    buffer.push(...links);
   }
 
   addTo(scene) {
-    scene.add(this.bulb);
-    scene.add(this.lines);
-    scene.add(this.tail);
+    scene.add(this.item);
   }
 
-  update() {
-    this.system.update();
-    this.updatePositionBuffer();
-    this.vertices.needsUpdate = true;
-  }
+  update() {}
 }

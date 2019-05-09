@@ -16,6 +16,5 @@ export function ring(aStart, bStart, segments, buffer) {
 }
 
 export function quad(a, b, c, d, faces) {
-  faces.push(c, b, a);
-  faces.push(c, d, b);
+  faces.push(a, b, c, c, d, a);
 }

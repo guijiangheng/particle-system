@@ -1,7 +1,7 @@
 import { Particle, Vector3 } from '../../src';
 
-export function point(position, particles) {
-  particles.push(new Particle(position));
+export function point(x, y, z, particles) {
+  particles.push(new Particle(new Vector3(x, y, z)));
 }
 
 export function circle(segments, radius, y, particles) {
