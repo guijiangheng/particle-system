@@ -1,6 +1,6 @@
 export function radial(indexCenter, indexStart, segments, buffer) {
   for (let i = 0; i < segments; ++i) {
-    buffer.push(indexCenter, indexStart + i, indexStart + ((i + 1) % segments));
+    buffer.push(indexCenter, indexStart + ((i + 1) % segments), indexStart + i);
   }
 }
 
@@ -10,11 +10,12 @@ export function ring(aStart, bStart, segments, buffer) {
     const b = aStart + ((i + 1) % segments);
     const c = bStart + ((i + 1) % segments);
     const d = bStart + i;
-    buffer.push(a, d, c);
-    buffer.push(c, b, a);
+    buffer.push(a, b, c);
+    buffer.push(d, a, c);
   }
 }
 
 export function quad(a, b, c, d, faces) {
-  faces.push(a, b, c, c, d, a);
+  faces.push(a, b, c);
+  faces.push(b, c, a);
 }
