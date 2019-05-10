@@ -24,6 +24,12 @@ function ribUvs(v, segments, buffer) {
   buffer.push(0, v);
 }
 
+function tentacleUvs(segments, uvs) {
+  for (let i = 0; i < segments; ++i) {
+    uvs.push(0, 0);
+  }
+}
+
 export default class Jellyfish extends Composite {
   constructor() {
     super();
@@ -32,15 +38,19 @@ export default class Jellyfish extends Composite {
     this.yOffset = 20;
     this.segments = 4;
     this.totalSegments = 4 * 9;
+    this.tentacleSegments = 120;
+    this.tentacleSegmentLength = 1.5;
 
     this.topStart = 3;
     this.uvs = [];
     this.links = [];
+    this.tentacleLinks = [];
     this.innerLinks = [];
     this.ribs = [];
     this.tailRibs = [];
     this.bulbFaces = [];
     this.tailFaces = [];
+    this.tentacles = [];
 
     this.createGeometry();
     this.createSceneItems();
@@ -51,6 +61,7 @@ export default class Jellyfish extends Composite {
     this.createBulb();
     this.createTail();
     this.createMouth();
+    this.createTentacles();
   }
 
   createCore() {
@@ -157,6 +168,68 @@ export default class Jellyfish extends Composite {
 
   createMouthArm(vScale, r0, r1, index, total, offset) {}
 
+  createTentacles() {
+    const groupCount = 3;
+    for (let i = 0; i < groupCount; ++i) {
+      this.createTentacleGroup(i, groupCount);
+    }
+  }
+
+  ribAt(index) {
+    const { ribs, tailRibs } = this;
+    return (
+      tailRibs[tailRibs.length - 1 - index] ||
+      ribs[ribs.length - 1 - index + tailRibs.length]
+    );
+  }
+
+  createTentacleGroup(index, total) {
+    const { tentacleSegments } = this;
+    const tentacleGroupStart = 6;
+    const tentacleGroupOffset = 4;
+    const ribIndex = tentacleGroupStart + tentacleGroupOffset * index;
+    const rib = this.ribAt(ribIndex);
+    const ratio = 1 - index / total;
+    const segments = tentacleSegments * ratio * 0.25 + tentacleSegments * 0.75;
+
+    for (let i = 0; i < segments; ++i) {
+      this.createTentacleSegment(index, i, rib);
+      if (i > 0) {
+        this.linkTentacle(index, i - 1, i);
+      } else {
+        this.attachTentacles(index, rib);
+      }
+    }
+  }
+
+  createTentacleSegment(groupIndex, index, rib) {
+    const { yOffset, totalSegments, tentacleSegmentLength, uvs } = this;
+    const radius = rib.radius * (0.25 * Math.sin(index * 0.25) + 0.5);
+    const y = yOffset - index * tentacleSegmentLength;
+    const start = this.particles.length;
+
+    Geometry.circle(totalSegments, radius, y, this.particles);
+    tentacleUvs(totalSegments, uvs);
+
+    if (index === 0) {
+      this.tentacles.push([]);
+    }
+
+    this.tentacles[groupIndex].push({
+      start
+    });
+  }
+
+  linkTentacle(groupIndex, rib0, rib1) {
+    const { totalSegments, tentacles, tentacleLinks } = this;
+    const tent0 = tentacles[groupIndex][rib0];
+    const tent1 = tentacles[groupIndex][rib1];
+    const links = Links.ring(tent0.start, tent1.start, totalSegments, []);
+    this.addLinks(links, tentacleLinks);
+  }
+
+  attachTentacles() {}
+
   createSceneItems() {
     this.item = new THREE.Group();
     this.uv = new THREE.BufferAttribute(new Float32Array(this.uvs), 2);
@@ -166,6 +239,7 @@ export default class Jellyfish extends Composite {
     this.createLines();
     this.createBulbMesh();
     this.createTailMesh();
+    this.createTentacleMesh();
   }
 
   createDots() {
@@ -183,10 +257,17 @@ export default class Jellyfish extends Composite {
 
     this.lines = new THREE.LineSegments(
       geom,
-      new THREE.LineBasicMaterial({
+      new THREE.RawShaderMaterial({
+        vertexShader: require('./shaders/tentacle-vert.glsl').default,
+        fragmentShader: require('./shaders/tentacle-frag.glsl').default,
         transparent: true,
-        opacity: 0.5,
-        blending: THREE.AdditiveBlending
+        depthTest: false,
+        depthWrite: false,
+        uniforms: {
+          diffuse: { value: new THREE.Color(0xffdde9) },
+          area: { value: 1200 },
+          opacity: { value: 0.35 }
+        }
       })
     );
 
@@ -270,6 +351,32 @@ export default class Jellyfish extends Composite {
     this.item.add(this.tail);
   }
 
+  createTentacleMesh() {
+    const { position, tentacleLinks } = this;
+
+    const geom = new THREE.BufferGeometry();
+    geom.addAttribute('position', position);
+    geom.setIndex(new THREE.BufferAttribute(new Uint16Array(tentacleLinks), 1));
+
+    this.tentacleMesh = new THREE.LineSegments(
+      geom,
+      new THREE.RawShaderMaterial({
+        vertexShader: require('./shaders/tentacle-vert.glsl').default,
+        fragmentShader: require('./shaders/tentacle-frag.glsl').default,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        uniforms: {
+          diffuse: { value: new THREE.Color(0x997299) },
+          area: { value: 2000 },
+          opacity: { value: 0.25 }
+        }
+      })
+    );
+
+    this.item.add(this.tentacleMesh);
+  }
+
   addLinks(links, buffer) {
     buffer = buffer || this.links;
     buffer.push(...links);
@@ -277,6 +384,13 @@ export default class Jellyfish extends Composite {
 
   addTo(scene) {
     scene.add(this.item);
+  }
+
+  updateLineWidth(lineWidth) {
+    const thin = Math.round(lineWidth);
+    const thick = Math.round(lineWidth * 2);
+    this.lines.material.linewidth = thin;
+    this.tentacleMesh.material.linewidth = thick;
   }
 
   update() {}

@@ -3,6 +3,13 @@ import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls
 import Dust from './Dust';
 import Jellyfish from './Jellyfish';
 
+function mapRange(a0, b0, a1, b1, x) {
+  const rangAInv = 1 / (b0 - a0);
+  const rangB = b1 - a1;
+  const t = (x - a0) * rangAInv;
+  return a1 + t * rangB;
+}
+
 export default class App {
   constructor() {
     this.scene = new THREE.Scene();
@@ -54,10 +61,22 @@ export default class App {
     this.controls = controls;
   }
 
+  mapDistance(x) {
+    const { minDistance, maxDistance } = this.controls;
+    return mapRange(minDistance, maxDistance, 0, 1, x);
+  }
+
   update() {
-    this.dust.update();
-    this.jellyfish.update();
-    this.controls.update();
-    this.renderer.render(this.scene, this.camera);
+    const { dust, jellyfish, controls, renderer, camera, scene } = this;
+
+    const distance = camera.position.length();
+    const distNorm = this.mapDistance(distance);
+    const lineWidth = Math.max(0.5, Math.round((1 - distNorm) * 2 * 1.5) / 2);
+    jellyfish.updateLineWidth(lineWidth);
+
+    dust.update();
+    jellyfish.update();
+    controls.update();
+    renderer.render(this.scene, this.camera);
   }
 }
