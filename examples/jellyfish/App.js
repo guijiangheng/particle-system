@@ -77,6 +77,6 @@ export default class App {
     dust.update();
     jellyfish.update();
     controls.update();
-    renderer.render(this.scene, this.camera);
+    renderer.render(scene, camera);
   }
 }

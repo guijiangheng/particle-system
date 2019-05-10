@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import * as Links from './Links';
 import * as Faces from './Faces';
 import * as Geometry from './Geometry';
-import { Composite } from '../../src';
+import { Composite, DistanceConstraint, ParticleSystem, DirectionalForce, Vector3 } from '../../src';
+import { AxisConstraint } from '../../src/Constraint';
 
 function ribRadius(t) {
   return (
@@ -30,19 +31,31 @@ function tentacleUvs(segments, uvs) {
   }
 }
 
+function innerRibIndices(offset, start, segments, buffer) {
+  const step = Math.floor(segments / 3);
+  for (let i = 0 ; i < 3; ++i) {
+    const a = offset + step * i;
+    const b = offset + step * (i + 1);
+    buffer.push(start + a % segments, start + b % segments);
+  }
+  return buffer;
+}
+
 export default class Jellyfish extends Composite {
   constructor() {
     super();
 
     this.size = 40;
     this.yOffset = 20;
+
     this.segments = 4;
-    this.totalSegments = 4 * 9;
+    this.totalSegments = this.segments * 9;
+
     this.tailArmSegments = 100;
+    this.tailArmSegmentLength = 1;
     this.tentacleSegments = 120;
     this.tentacleSegmentLength = 1.5;
 
-    this.topStart = 3;
     this.uvs = [];
     this.links = [];
     this.tentacleLinks = [];
@@ -53,9 +66,52 @@ export default class Jellyfish extends Composite {
     this.bulbFaces = [];
     this.tailFaces = [];
     this.mouthFaces = [];
+    this.constraints = [];
 
     this.createGeometry();
+    this.createSystem();
     this.createSceneItems();
+  }
+
+  distanceConstraints(indices, minDistance, maxDistance) {
+    const constraints = [];
+    for (let i = 0; i < indices.length; i += 2) {
+      constraints.push(
+        new DistanceConstraint(
+          this.particles[indices[i]],
+          this.particles[indices[i + 1]],
+          minDistance,
+          maxDistance
+        )
+      );
+    }
+    return constraints;
+  }
+
+  axisConstraints(indices, startPoint, endPoint) {
+    const constraints = [];
+    for (let index of indices) {
+      constraints.push(
+        new AxisConstraint(
+          this.particles[startPoint].position,
+          this.particles[endPoint].position,
+          this.particles[index]
+        )
+      );
+    }
+    return constraints;
+  }
+
+  queneConstraints(...constraints) {
+    for (const constraint of constraints) {
+      if (constraint instanceof Array) {
+        for (const c of constraint) {
+          this.constraints.push(c);
+        }
+      } else {
+        this.constraints.push(constraint);
+      }
+    }
   }
 
   createGeometry() {
@@ -67,15 +123,55 @@ export default class Jellyfish extends Composite {
   }
 
   createCore() {
-    const { size, totalSegments, uvs, particles, bulbFaces, topStart } = this;
-    const offsets = [size * 1.5, -size * 0.5, -size];
+    const { size, yOffset, totalSegments, uvs, particles, bulbFaces } = this;
+
+    const pinTop = (this.pinTop = 0);
+    const pinMid = (this.pinMid = 1);
+    const pintBottom = (this.pinBottom = 2);
+    this.pinTail = 3;
+    this.pinTentacle = 4;
+
+    const indexTop = (this.indexTop = 5);
+    const indexMid = (this.indexMid = 6);
+    const indexBottom = (this.indexBottom = 7);
+    const topStart = (this.topStart = 8);
+
+    const {
+      tailArmSegments,
+      tailArmSegmentLength,
+      tentacleSegments,
+      tentacleSegmentLength
+    } = this;
+    
+    const posTop = (this.posTop = yOffset + size);
+    const posMid = (this.posMid = yOffset);
+    const posBottom = (this.posBottom = yOffset - size);
+    const posTail = (this.posTail = yOffset - tailArmSegments * tailArmSegmentLength);
+    const posTentacle = (this.posTentacle = yOffset - tentacleSegments * tentacleSegmentLength * 1.5);
+
+    const offsets = [
+      posTop, posMid, posBottom, posTail, posTentacle,
+      size * 1.5, -size * 0.5, -size
+    ];
 
     for (const offset of offsets) {
       Geometry.point(0, offset, 0, particles);
       uvs.push(0, 0);
     }
 
-    Faces.radial(0, topStart, totalSegments, bulbFaces);
+    const rangeTop = [0, size * 0.5];
+    const rangeMid = [size * 0.5, size * 0.7];
+    const rangeTopBottom = [size, size * 2];
+    const rangeBottom = [0, size * 0.5];
+
+    const spineA = this.distanceConstraints([pinTop, indexTop], ...rangeTop);
+    const spineB = this.distanceConstraints([indexTop, indexMid], ...rangeMid);
+    const spineC = this.distanceConstraints([pintBottom, indexBottom], ...rangeBottom);
+    const spineD = this.distanceConstraints([indexTop, indexBottom], ...rangeTopBottom);
+    const axis = this.axisConstraints([indexTop, indexMid, indexBottom], pinTop, pinMid);
+
+    this.queneConstraints(spineA, spineB, spineC, spineD, axis);
+    Faces.radial(indexTop, topStart, totalSegments, bulbFaces);
   }
 
   createBulb() {
@@ -100,9 +196,32 @@ export default class Jellyfish extends Composite {
     Geometry.circle(totalSegments, radius, y, particles);
     ribUvs(k, totalSegments, uvs);
 
-    if (index === 0) {
-      this.addLinks(Links.radial(0, start, totalSegments, []));
+    const ribIndices = Links.loop(start, totalSegments, []);
+    const outerLen = Math.PI * 2 * radius / totalSegments;
+    const outerRib = this.distanceConstraints(ribIndices, outerLen * 0.9, outerLen);
+
+    const innerLen = Math.PI * 2 * radius / 3;
+    const innerRib = this.createInnerRib(start, innerLen);
+
+    const isTop = index === 0;
+    const isBottom = index === total - 1;
+
+    if (isTop || isBottom) {
+      const spineCenter = isTop ? this.indexTop : this.indexBottom;
+      const radiusSpine = isTop ? radius * 1.25 : radius;
+      const spineIndices = Links.radial(spineCenter, start, totalSegments, []);
+      const spine = this.distanceConstraints(
+        spineIndices,
+        radius * 0.5, radiusSpine
+      );
+      this.queneConstraints(spine);
+
+      if (isTop) {
+        this.addLinks(spineIndices);
+      }
     }
+
+    this.queneConstraints(outerRib, innerRib);
 
     this.ribs.push({
       start,
@@ -111,11 +230,26 @@ export default class Jellyfish extends Composite {
     });
   }
 
+  createInnerRib(start, length) {
+    const { segments, totalSegments } = this;
+    const indices = [];
+    for (let i = 0; i < segments; ++i) {
+      innerRibIndices(i * 3, start, totalSegments, indices);
+    }
+    return this.distanceConstraints(indices, length * 0.8, length);
+  }
+
   createSkin(r0, r1) {
-    const { totalSegments, bulbFaces } = this;
+    const { totalSegments, bulbFaces, particles } = this;
     const rib0 = this.ribs[r0];
     const rib1 = this.ribs[r1];
-    this.addLinks(Links.ring(rib0.start, rib1.start, totalSegments, []));
+
+    const dist = particles[rib0.start].distance(particles[rib1.start]);
+    const skinIndices = Links.ring(rib0.start, rib1.start, totalSegments, []);
+    const skin = this.distanceConstraints(skinIndices, dist * 0.5, dist);
+    this.queneConstraints(skin);
+    this.addLinks(skinIndices);
+
     Faces.ring(rib0.start, rib1.start, totalSegments, bulbFaces);
   }
 
@@ -135,9 +269,34 @@ export default class Jellyfish extends Composite {
     const y = lastRib.yPos - k * size * 0.8;
     const start = particles.length;
     const radius = tailRibRadius(k) * lastRib.radius;
+    const radiusOuter = radius + k * 20;
 
     Geometry.circle(totalSegments, radius, y, particles);
     ribUvs(k, totalSegments, uvs);
+
+    const outerIndices = Links.loop(start, totalSegments, []);
+    const outerLen = Math.PI * 2 * radiusOuter / totalSegments;
+    const outerRib = this.distanceConstraints(
+      outerIndices, outerLen * 0.9, outerLen * 1.5
+    );
+
+    const innerLen = Math.PI * 2 * radius / 3;
+    const innerRib = this.createInnerRib(start, innerLen);
+
+    if (index === total - 1) {
+      const spineCenter = this.indexMid;
+      const spine = this.distanceConstraints(
+        Links.radial(spineCenter, start, totalSegments, []),
+        radius * 0.8, radius
+      );
+      this.queneConstraints(spine);
+    }
+
+    this.queneConstraints(outerRib, innerRib);
+
+    if (index > 2) {
+      this.addLinks(outerIndices);
+    }
 
     this.tailRibs.push({
       start,
@@ -146,13 +305,17 @@ export default class Jellyfish extends Composite {
   }
 
   createTailSkin(r0, r1) {
-    const { totalSegments, ribs, tailRibs, tailFaces, innerLinks } = this;
+    const { totalSegments, ribs, tailRibs, tailFaces, particles } = this;
     const rib0 = r0 < 0 ? ribs[ribs.length - 1] : tailRibs[r0];
     const rib1 = tailRibs[r1];
-    this.addLinks(
+
+    const dist = particles[rib0.start].position.distance(particles[rib1.start].position);
+    const skin = this.distanceConstraints(
       Links.ring(rib0.start, rib1.start, totalSegments, []),
-      innerLinks
+      dist * 0.5, dist
     );
+
+    this.queneConstraints(skin);
     Faces.ring(rib0.start, rib1.start, totalSegments, tailFaces);
   }
 
@@ -173,7 +336,6 @@ export default class Jellyfish extends Composite {
       yOffset,
       totalSegments,
       tailArmSegments,
-      links,
       uvs,
       particles,
       mouthFaces
@@ -215,7 +377,7 @@ export default class Jellyfish extends Composite {
         (Math.sin(Math.PI * 0.5 + 10 * t) * 0.25 + 0.75) *
         (Math.sin(Math.PI * 0.5 + 20 * t) * 0.25 + 0.75) *
         (Math.sin(Math.PI * 0.5 + 26 * t) * 0.15 + 0.85) *
-        Math.sin(Math.PI * 0.5 + Math.PI * 0.45 * t);
+         Math.sin(Math.PI * 0.5 + Math.PI * 0.45 * t);
       const outerX = baseX * linkSize;
       const outerZ = baseZ * linkSize;
       const outerY = yOffset - i * innerSize;
@@ -279,6 +441,8 @@ export default class Jellyfish extends Composite {
         this.attachTentacles(index, rib);
       }
     }
+
+    this.attachTentaclesSpine(index);
   }
 
   createTentacleSegment(groupIndex, index, rib) {
@@ -300,14 +464,49 @@ export default class Jellyfish extends Composite {
   }
 
   linkTentacle(groupIndex, rib0, rib1) {
-    const { totalSegments, tentacles, tentacleLinks } = this;
+    const { totalSegments, tentacleSegmentLength, tentacles, tentacleLinks } = this;
     const tent0 = tentacles[groupIndex][rib0];
     const tent1 = tentacles[groupIndex][rib1];
-    const links = Links.ring(tent0.start, tent1.start, totalSegments, []);
-    this.addLinks(links, tentacleLinks);
+    const indices = Links.ring(tent0.start, tent1.start, totalSegments, []);
+    const links = this.distanceConstraints(indices, 0.5 * tentacleSegmentLength, tentacleSegmentLength);
+    this.queneConstraints(links);
+    this.addLinks(indices, tentacleLinks);
   }
 
-  attachTentacles() {}
+  attachTentacles(groupIndex, rib) {
+    const { tentacles, totalSegments, tentacleSegmentLength } = this;
+    const tent = tentacles[groupIndex][0];
+    const indices = Links.ring(rib.start, tent.start, totalSegments, []);
+    this.queneConstraints(this.distanceConstraints(
+      indices, tentacleSegmentLength * 0.5, tentacleSegmentLength
+    ));
+    this.addLinks(indices, this.tentacleLinks);
+  }
+
+  attachTentaclesSpine(groupIndex) {
+    const { tentacles, pinTentacle, totalSegments } = this;
+    const group = tentacles[groupIndex];
+    const tent = group[group.length - 1];
+    const start = tent.start;
+    const center = pinTentacle;
+    const dist = this.tentacleSegments * this.tentacleSegmentLength;
+    const spine = this.distanceConstraints(
+      Links.radial(center, start, totalSegments, []),
+      dist * 0.5, dist
+    );
+    this.queneConstraints(spine);
+  }
+
+  createSystem() {
+    this.system = new ParticleSystem(10);
+    this.system.addComposite(this);
+    this.system.addForce(new DirectionalForce(new Vector3(0, -0.01, 0)));
+    this.pin(this.pinTop);
+    this.pin(this.pinMid);
+    this.pin(this.pinBottom);
+    this.pin(this.pinTail);
+    this.pin(this.pinTentacle);
+  }
 
   createSceneItems() {
     this.item = new THREE.Group();
@@ -315,10 +514,13 @@ export default class Jellyfish extends Composite {
     this.position = new THREE.BufferAttribute(this.getPositionBuffer(), 3);
 
     this.createLines();
+    this.createInnerLines();
     this.createBulbMesh();
     this.createTailMesh();
     this.createTentacleMesh();
     this.createMouthMesh();
+
+    this.item.position.y = 20;
   }
 
   createLines() {
@@ -346,6 +548,28 @@ export default class Jellyfish extends Composite {
     this.item.add(this.lines);
   }
 
+  createInnerLines() {
+    const geom = new THREE.BufferGeometry();
+    geom.addAttribute('position', this.position);
+    geom.setIndex(
+      new THREE.BufferAttribute(new Uint16Array(this.innerLinks), 1)
+    );
+
+    this.linesInner = new THREE.LineSegments(
+      geom,
+      new THREE.LineBasicMaterial({
+        color: 0xf99ebd,
+        transparent: true,
+        opacity: 0.15,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false
+      })
+    );
+
+    this.item.add(this.linesInner);
+  }
+
   createBulbMesh() {
     const geom = new THREE.BufferGeometry();
     geom.addAttribute('position', this.position);
@@ -353,8 +577,6 @@ export default class Jellyfish extends Composite {
     geom.setIndex(
       new THREE.BufferAttribute(new Uint16Array(this.bulbFaces), 1)
     );
-
-    geom.computeVertexNormals();
 
     this.bulb = new THREE.Mesh(
       geom,
@@ -401,8 +623,6 @@ export default class Jellyfish extends Composite {
     geom.setIndex(
       new THREE.BufferAttribute(new Uint16Array(this.tailFaces), 1)
     );
-
-    geom.computeVertexNormals();
 
     this.tail = new THREE.Mesh(
       geom,
@@ -457,8 +677,6 @@ export default class Jellyfish extends Composite {
       new THREE.BufferAttribute(new Uint16Array(this.mouthFaces), 1)
     );
 
-    geom.computeVertexNormals();
-
     this.mouth = new THREE.Mesh(
       geom,
       new THREE.RawShaderMaterial({
@@ -491,8 +709,13 @@ export default class Jellyfish extends Composite {
     const thin = Math.round(lineWidth);
     const thick = Math.round(lineWidth * 2);
     this.lines.material.linewidth = thin;
+    this.linesInner.material.linewidth = thin;
     this.tentacleMesh.material.linewidth = thick;
   }
 
-  update() {}
+  update() {
+    this.system.update();
+    this.updatePositionBuffer();
+    this.position.needsUpdate = true;
+  }
 }
