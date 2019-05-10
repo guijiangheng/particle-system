@@ -17,5 +17,12 @@ export function ring(aStart, bStart, segments, buffer) {
 
 export function quad(a, b, c, d, faces) {
   faces.push(a, b, c);
-  faces.push(b, c, a);
+  faces.push(c, d, a);
+}
+
+export function quadDoubleSide(a, b, c, d, faces) {
+  faces.push(a, b, c);
+  faces.push(c, d, a);
+  faces.push(d, c, b);
+  faces.push(b, a, d);
 }

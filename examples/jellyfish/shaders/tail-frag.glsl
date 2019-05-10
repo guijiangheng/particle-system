@@ -34,5 +34,6 @@ void main() {
 
   gl_FragColor = vec4(
     mix(diffuseB, diffuse, saturation) * opacity,
-    clamp(saturation, 0.2, 1.0) * opacity);
+    clamp(saturation, 0.2, 1.0) * opacity
+  );
 }

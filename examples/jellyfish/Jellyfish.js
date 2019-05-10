@@ -38,6 +38,7 @@ export default class Jellyfish extends Composite {
     this.yOffset = 20;
     this.segments = 4;
     this.totalSegments = 4 * 9;
+    this.tailArmSegments = 100;
     this.tentacleSegments = 120;
     this.tentacleSegmentLength = 1.5;
 
@@ -48,9 +49,10 @@ export default class Jellyfish extends Composite {
     this.innerLinks = [];
     this.ribs = [];
     this.tailRibs = [];
+    this.tentacles = [];
     this.bulbFaces = [];
     this.tailFaces = [];
-    this.tentacles = [];
+    this.mouthFaces = [];
 
     this.createGeometry();
     this.createSceneItems();
@@ -127,7 +129,7 @@ export default class Jellyfish extends Composite {
   }
 
   createTailRib(index, total) {
-    const { size, totalSegments, ribs, verts, uvs, particles } = this;
+    const { size, totalSegments, ribs, uvs, particles } = this;
     const lastRib = ribs[ribs.length - 1];
     const k = index / total;
     const y = lastRib.yPos - k * size * 0.8;
@@ -166,7 +168,84 @@ export default class Jellyfish extends Composite {
     }
   }
 
-  createMouthArm(vScale, r0, r1, index, total, offset) {}
+  createMouthArm(vScale, r0, r1, index, total, offset = 0) {
+    const {
+      yOffset,
+      totalSegments,
+      tailArmSegments,
+      links,
+      uvs,
+      particles,
+      mouthFaces
+    } = this;
+
+    const k = index / total;
+    const ribInner = this.ribAt(r0);
+    const ribOuter = this.ribAt(r1);
+    const ribIndex = (Math.round(totalSegments * k) + offset) % totalSegments;
+    const segments = Math.round(vScale * tailArmSegments);
+    const innerSize = 1;
+    const outerSize = innerSize * 2.4;
+
+    const innerPin = ribInner.start + ribIndex;
+    const outerPin = ribOuter.start + ribIndex;
+    const scale = particles[innerPin].position.distance(
+      particles[outerPin].position
+    );
+
+    const innerStart = particles.length;
+    const innerEnd = innerStart + segments - 1;
+    const outerStart = innerEnd + 1;
+    const innerIndices = Links.line(innerStart, segments, []);
+    const outerIndices = Links.line(outerStart, segments, []);
+
+    for (let i = 0; i < segments; ++i) {
+      Geometry.point(0, yOffset - i * innerSize, 0, particles);
+      uvs.push(i / (segments - 1), 0);
+    }
+
+    const angle = Math.PI * 2 * k;
+    const baseX = Math.cos(angle);
+    const baseZ = Math.sin(angle);
+
+    for (let i = 0; i < segments; ++i) {
+      const t = i / (segments - 1);
+      const linkSize =
+        scale *
+        (Math.sin(Math.PI * 0.5 + 10 * t) * 0.25 + 0.75) *
+        (Math.sin(Math.PI * 0.5 + 20 * t) * 0.25 + 0.75) *
+        (Math.sin(Math.PI * 0.5 + 26 * t) * 0.15 + 0.85) *
+        Math.sin(Math.PI * 0.5 + Math.PI * 0.45 * t);
+      const outerX = baseX * linkSize;
+      const outerZ = baseZ * linkSize;
+      const outerY = yOffset - i * innerSize;
+
+      Geometry.point(outerX, outerY, outerZ, particles);
+      uvs.push(t, 1);
+
+      const innerIndex = innerStart + i;
+      const outerIndex = outerStart + i;
+      // links.push(innerIndex, outerIndex);
+
+      if (i > 1) {
+        // links.push(innerIndex - 1, outerIndex);
+        Faces.quad(
+          innerIndex - 1,
+          outerIndex - 1,
+          outerIndex,
+          innerIndex,
+          mouthFaces
+        );
+      }
+
+      if (i > 10) {
+        // links.push(innerIndex - 10, outerIndex);
+      }
+    }
+
+    this.addLinks(innerIndices);
+    this.addLinks(outerIndices);
+  }
 
   createTentacles() {
     const groupCount = 3;
@@ -235,25 +314,17 @@ export default class Jellyfish extends Composite {
     this.uv = new THREE.BufferAttribute(new Float32Array(this.uvs), 2);
     this.position = new THREE.BufferAttribute(this.getPositionBuffer(), 3);
 
-    // this.createDots();
     this.createLines();
     this.createBulbMesh();
     this.createTailMesh();
     this.createTentacleMesh();
-  }
-
-  createDots() {
-    const geom = new THREE.BufferGeometry();
-    geom.addAttribute('position', this.position);
-    this.dots = new THREE.Points(geom, new THREE.PointsMaterial());
-    this.item.add(this.dots);
+    this.createMouthMesh();
   }
 
   createLines() {
     const geom = new THREE.BufferGeometry();
-    const indices = new THREE.BufferAttribute(new Uint16Array(this.links), 1);
     geom.addAttribute('position', this.position);
-    geom.setIndex(indices);
+    geom.setIndex(new THREE.BufferAttribute(new Uint16Array(this.links), 1));
 
     this.lines = new THREE.LineSegments(
       geom,
@@ -263,6 +334,7 @@ export default class Jellyfish extends Composite {
         transparent: true,
         depthTest: false,
         depthWrite: false,
+        blending: THREE.AdditiveBlending,
         uniforms: {
           diffuse: { value: new THREE.Color(0xffdde9) },
           area: { value: 1200 },
@@ -375,6 +447,35 @@ export default class Jellyfish extends Composite {
     );
 
     this.item.add(this.tentacleMesh);
+  }
+
+  createMouthMesh() {
+    const geom = new THREE.BufferGeometry();
+    geom.addAttribute('position', this.position);
+    geom.addAttribute('uv', this.uv);
+    geom.setIndex(
+      new THREE.BufferAttribute(new Uint16Array(this.mouthFaces), 1)
+    );
+
+    geom.computeVertexNormals();
+
+    this.mouth = new THREE.Mesh(
+      geom,
+      new THREE.RawShaderMaterial({
+        side: THREE.DoubleSide,
+        vertexShader: require('./shaders/normal-vert.glsl').default,
+        fragmentShader: require('./shaders/tail-frag.glsl').default,
+        transparent: true,
+        uniforms: {
+          diffuse: { value: new THREE.Color(0xefa6f0) },
+          diffuseB: { value: new THREE.Color(0x4a67ce) },
+          scale: { value: 3 },
+          opacity: { value: 0.65 }
+        }
+      })
+    );
+
+    this.item.add(this.mouth);
   }
 
   addLinks(links, buffer) {
