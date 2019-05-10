@@ -32,7 +32,7 @@ module.exports = {
       chunks: ['particles']
     }),
     new HtmlWebpackPlugin({
-      filename: 'jellyfish.html',
+      filename: 'index.html',
       title: 'jellyfish',
       chunks: ['jellyfish']
     })

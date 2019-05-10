@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "start": "webpack-dev-server --config ./configs/dev.js",
-    "build": "webpack --config ./configs/prod.js"
+    "build": "webpack --config ./configs/prod.js",
+    "deploy": "gh-pages -d ./dist"
   },
   "keywords": [],
   "author": "",
@@ -18,6 +19,7 @@
     "css-loader": "^2.1.1",
     "eslint": "^5.16.0",
     "eslint-loader": "^2.1.2",
+    "gh-pages": "^2.0.1",
     "html-webpack-plugin": "^3.2.0",
     "raw-loader": "^2.0.0",
     "style-loader": "^0.23.1",
